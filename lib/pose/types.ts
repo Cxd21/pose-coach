@@ -34,6 +34,30 @@ export interface PoseDetectionResult {
   imageHeight: number;
 }
 
+/** One detected hand: its 21 landmarks plus which hand it is. */
+export interface HandDetectionEntry {
+  landmarks: NormalizedLandmark[];
+  handedness: "Left" | "Right";
+  /** Model's confidence in the handedness classification, 0-1. */
+  score: number;
+}
+
+/**
+ * Combined result of running body pose, face mesh, and hand detection on
+ * the same image. This is what the debug UI consumes — it doesn't need to
+ * know these came from three separate MediaPipe models under the hood.
+ */
+export interface CombinedDetectionResult {
+  imageWidth: number;
+  imageHeight: number;
+  /** Body pose landmarks, one entry per detected person (33 points each). */
+  poses: NormalizedLandmark[][];
+  /** Detailed face mesh landmarks, one entry per detected face (478 points each). */
+  faces: NormalizedLandmark[][];
+  /** Detected hands, each with 21 finger-joint landmarks. */
+  hands: HandDetectionEntry[];
+}
+
 /** The 33 landmark indices used by the MediaPipe Pose Landmarker model, named for readability. */
 export enum PoseLandmarkIndex {
   NOSE = 0,

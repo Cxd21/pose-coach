@@ -1,15 +1,15 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { detectPoseInImage, drawAllPoses } from "@/lib/pose";
-import type { PoseDetectionResult } from "@/lib/pose";
+import { detectFullBodyInImage, drawFullBodyDetection } from "@/lib/pose";
+import type { CombinedDetectionResult } from "@/lib/pose";
 
 type Status = "idle" | "loading-model" | "detecting" | "done" | "error";
 
 export default function PoseDebugger() {
   const [status, setStatus] = useState<Status>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [result, setResult] = useState<PoseDetectionResult | null>(null);
+  const [result, setResult] = useState<CombinedDetectionResult | null>(null);
   const [hasImage, setHasImage] = useState(false);
 
   const imageRef = useRef<HTMLImageElement | null>(null);
@@ -20,18 +20,18 @@ export default function PoseDebugger() {
     setErrorMessage(null);
     setStatus("loading-model");
     try {
-      // detectPoseInImage lazily loads the model on first call, so the
-      // "loading-model" vs "detecting" distinction is approximate but
-      // gives the user useful feedback on the first run.
+      // detectFullBodyInImage lazily loads all three models (pose, face,
+      // hand) on first call, so "loading-model" vs "detecting" is
+      // approximate but gives useful feedback on the first run.
       setStatus("detecting");
-      const detection = await detectPoseInImage(image);
+      const detection = await detectFullBodyInImage(image);
       setResult(detection);
 
       const canvas = canvasRef.current;
       if (canvas) {
         canvas.width = image.naturalWidth;
         canvas.height = image.naturalHeight;
-        drawAllPoses(canvas, detection.poses);
+        drawFullBodyDetection(canvas, detection);
       }
 
       setStatus("done");
@@ -71,7 +71,8 @@ export default function PoseDebugger() {
     [runDetection]
   );
 
-  const totalLandmarksDetected = result?.poses[0]?.length ?? 0;
+  const bodyLandmarkCount = result?.poses[0]?.length ?? 0;
+  const faceLandmarkCount = result?.faces[0]?.length ?? 0;
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
@@ -111,12 +112,20 @@ export default function PoseDebugger() {
         </div>
 
         {result && (
-          <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            <Stat label="Poses found" value={result.poses.length} />
-            <Stat label="Landmarks / pose" value={totalLandmarksDetected} />
-            <Stat label="Image width" value={`${result.imageWidth}px`} />
-            <Stat label="Image height" value={`${result.imageHeight}px`} />
-          </dl>
+          <>
+            <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+              <Stat label="Poses found" value={result.poses.length} />
+              <Stat label="Body landmarks" value={bodyLandmarkCount} />
+              <Stat label="Face landmarks" value={faceLandmarkCount} />
+              <Stat label="Hands found" value={result.hands.length} />
+            </dl>
+            <div className="mt-3 flex flex-wrap gap-4 text-xs text-neutral-500">
+              <Legend color="#22d3ee" label="Body joints" />
+              <Legend color="#a3e635" label="Body bones" />
+              <Legend color="#f472b6" label="Face mesh" />
+              <Legend color="#fbbf24" label="Hand / finger joints" />
+            </div>
+          </>
         )}
       </section>
     </div>
@@ -132,11 +141,20 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
+function Legend({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+      {label}
+    </span>
+  );
+}
+
 function StatusBadge({ status }: { status: Status }) {
   const map: Record<Status, { label: string; className: string }> = {
     idle: { label: "Waiting for image", className: "bg-neutral-800 text-neutral-400" },
-    "loading-model": { label: "Loading model…", className: "bg-amber-900/50 text-amber-300" },
-    detecting: { label: "Detecting pose…", className: "bg-amber-900/50 text-amber-300" },
+    "loading-model": { label: "Loading models…", className: "bg-amber-900/50 text-amber-300" },
+    detecting: { label: "Detecting…", className: "bg-amber-900/50 text-amber-300" },
     done: { label: "Done", className: "bg-emerald-900/50 text-emerald-300" },
     error: { label: "Error", className: "bg-red-900/50 text-red-300" },
   };

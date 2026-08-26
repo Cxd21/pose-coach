@@ -13,24 +13,22 @@
  */
 
 import {
-  FilesetResolver,
   PoseLandmarker,
   type PoseLandmarkerResult,
 } from "@mediapipe/tasks-vision";
 import type { NormalizedLandmark, PoseDetectionResult } from "./types";
+import { getVisionFileset } from "./visionRuntime";
 
-// MediaPipe ships its WASM binaries on a public CDN, versioned to match
-// the npm package. Pinning the version avoids surprise breakage.
-// This must match the installed "@mediapipe/tasks-vision" version in
-// package.json — bump both together.
-const WASM_FILESET_URL =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
-
-// Official Google-hosted pose landmarker model. "lite" is smallest/fastest;
-// swap to pose_landmarker_full.task or pose_landmarker_heavy.task later for
-// more accuracy at the cost of speed, once we care about live-video framerate.
+// Official Google-hosted pose landmarker model. We use "full" rather than
+// "lite": lite frequently mislocates limbs in harder poses (crossed/bent
+// legs, occluded joints — exactly the kind of reference photos this app
+// needs to handle), and "full" fixes most of that at a modest speed cost
+// that's a non-issue for single-image (non-live-video) detection. If we
+// later need this to run in real time on live camera frames and it's too
+// slow, drop back to pose_landmarker_lite.task; for even higher accuracy,
+// pose_landmarker_heavy.task is the next step up from "full".
 const MODEL_ASSET_URL =
-  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task";
 
 let landmarkerPromise: Promise<PoseLandmarker> | null = null;
 
@@ -42,7 +40,7 @@ let landmarkerPromise: Promise<PoseLandmarker> | null = null;
 async function getPoseLandmarker(): Promise<PoseLandmarker> {
   if (!landmarkerPromise) {
     landmarkerPromise = (async () => {
-      const vision = await FilesetResolver.forVisionTasks(WASM_FILESET_URL);
+      const vision = await getVisionFileset();
       return PoseLandmarker.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath: MODEL_ASSET_URL,
@@ -50,6 +48,10 @@ async function getPoseLandmarker(): Promise<PoseLandmarker> {
         },
         runningMode: "IMAGE",
         numPoses: 1,
+        // Slightly below the library default (0.5) so limbs that are
+        // partially self-occluded (e.g. a bent/crossed raised leg) are
+        // still reported instead of being dropped from the result.
+        minPosePresenceConfidence: 0.4,
       });
     })();
   }
