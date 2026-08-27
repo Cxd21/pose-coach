@@ -1,8 +1,11 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { detectFullBodyInImage, drawFullBodyDetection } from "@/lib/pose";
 import type { CombinedDetectionResult } from "@/lib/pose";
+import { buildPoseRepresentation } from "@/lib/pose-processing";
+import type { PoseRepresentation } from "@/lib/pose-processing";
+import PoseDataDebug from "./PoseDataDebug";
 
 type Status = "idle" | "loading-model" | "detecting" | "done" | "error";
 
@@ -74,6 +77,12 @@ export default function PoseDebugger() {
   const bodyLandmarkCount = result?.poses[0]?.length ?? 0;
   const faceLandmarkCount = result?.faces[0]?.length ?? 0;
 
+  const poseRepresentation = useMemo<PoseRepresentation | null>(() => {
+    const primaryPose = result?.poses[0];
+    if (!primaryPose) return null;
+    return buildPoseRepresentation(primaryPose);
+  }, [result]);
+
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
       <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-6">
@@ -128,6 +137,8 @@ export default function PoseDebugger() {
           </>
         )}
       </section>
+
+      {poseRepresentation && <PoseDataDebug representation={poseRepresentation} />}
     </div>
   );
 }
