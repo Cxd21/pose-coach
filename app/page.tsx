@@ -1,3 +1,4 @@
+import Link from "next/link";
 import PoseDebugger from "@/app/components/PoseDebugger";
 
 export default function Home() {
@@ -11,6 +12,11 @@ export default function Home() {
           Milestone 1: upload a reference photo, run MediaPipe Pose Landmarker on it, and
           visualize the detected landmarks. This skeleton overlay is for development only and
           will not appear in the final product.
+        </p>
+        <p className="mt-2 text-sm">
+          <Link href="/scoring" className="text-cyan-400 hover:underline">
+            → Milestone 3: pose similarity scoring debug
+          </Link>
         </p>
       </div>
       <PoseDebugger />
