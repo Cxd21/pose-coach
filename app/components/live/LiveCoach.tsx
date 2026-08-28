@@ -150,6 +150,7 @@ export default function LiveCoach() {
         /* Result Screen */
         <PoseResultScreen
           photoUrl={capturedPhotoUrl}
+          referencePose={referencePose}
           result={capturedResult}
           onRetake={handleRetake}
           onDone={handleDone}
