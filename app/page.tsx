@@ -18,6 +18,11 @@ export default function Home() {
             → Milestone 3: pose similarity scoring debug
           </Link>
         </p>
+        <p className="mt-1 text-sm">
+          <Link href="/live" className="text-pink-400 hover:underline font-medium">
+            → Milestone 5: Gen-Z Live Camera Pose Coach (Active)
+          </Link>
+        </p>
       </div>
       <PoseDebugger />
     </main>

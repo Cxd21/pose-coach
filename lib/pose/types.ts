@@ -1,23 +1,14 @@
 /**
  * Domain types for pose detection results.
- *
- * We deliberately re-declare a minimal shape here instead of exporting
- * MediaPipe's own types everywhere else in the app. That way, if we ever
- * swap the underlying pose model, only this file + landmarker.ts need to
- * change — the UI and any future comparison logic depend on this contract,
- * not on MediaPipe directly.
  */
 
-/** A single 2D/3D landmark point, normalized to [0, 1] relative to image size. */
 export interface NormalizedLandmark {
   x: number;
   y: number;
   z: number;
-  /** Model's confidence that this landmark is visible (not occluded). 0-1. */
   visibility?: number;
 }
 
-/** Same as NormalizedLandmark but in absolute pixel coordinates for a given image size. */
 export interface PixelLandmark {
   x: number;
   y: number;
@@ -25,40 +16,34 @@ export interface PixelLandmark {
   visibility?: number;
 }
 
-/** Result of running pose detection on a single image. */
-export interface PoseDetectionResult {
-  /** One entry per detected person. MediaPipe Pose Landmarker can detect multiple poses. */
-  poses: NormalizedLandmark[][];
-  /** Width/height of the image that was analyzed, in pixels. Needed to convert to pixel coords. */
-  imageWidth: number;
-  imageHeight: number;
+export interface RawSegmentationMask {
+  data: Float32Array;
+  width: number;
+  height: number;
 }
 
-/** One detected hand: its 21 landmarks plus which hand it is. */
+export interface PoseDetectionResult {
+  poses: NormalizedLandmark[][];
+  imageWidth: number;
+  imageHeight: number;
+  segmentationMask?: RawSegmentationMask | null;
+}
+
 export interface HandDetectionEntry {
   landmarks: NormalizedLandmark[];
   handedness: "Left" | "Right";
-  /** Model's confidence in the handedness classification, 0-1. */
   score: number;
 }
 
-/**
- * Combined result of running body pose, face mesh, and hand detection on
- * the same image. This is what the debug UI consumes — it doesn't need to
- * know these came from three separate MediaPipe models under the hood.
- */
 export interface CombinedDetectionResult {
   imageWidth: number;
   imageHeight: number;
-  /** Body pose landmarks, one entry per detected person (33 points each). */
   poses: NormalizedLandmark[][];
-  /** Detailed face mesh landmarks, one entry per detected face (478 points each). */
   faces: NormalizedLandmark[][];
-  /** Detected hands, each with 21 finger-joint landmarks. */
   hands: HandDetectionEntry[];
+  segmentationMask?: RawSegmentationMask | null;
 }
 
-/** The 33 landmark indices used by the MediaPipe Pose Landmarker model, named for readability. */
 export enum PoseLandmarkIndex {
   NOSE = 0,
   LEFT_EYE_INNER = 1,
@@ -95,7 +80,6 @@ export enum PoseLandmarkIndex {
   RIGHT_FOOT_INDEX = 32,
 }
 
-/** Bone connections between landmark indices, used for drawing a skeleton overlay. */
 export const POSE_CONNECTIONS: ReadonlyArray<readonly [number, number]> = [
   // Face
   [0, 1], [1, 2], [2, 3], [3, 7], [0, 4], [4, 5], [5, 6], [6, 8], [9, 10],

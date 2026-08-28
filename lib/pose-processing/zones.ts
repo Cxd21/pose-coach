@@ -1,13 +1,3 @@
-/**
- * Builds each anatomical zone (head, torso, arms, legs) from normalized
- * landmarks: picks out the relevant named landmarks and computes the joint
- * angles that matter for that zone.
- *
- * Landmark indices are reused from lib/pose/types.ts's PoseLandmarkIndex —
- * not re-declared here — so this module can't drift out of sync with the
- * detection code if MediaPipe's landmark ordering ever changes.
- */
-
 import { PoseLandmarkIndex } from "@/lib/pose/types";
 import { angleBetween, angleFromVertical } from "./angles";
 import type {
@@ -19,7 +9,6 @@ import type {
   LimbZone,
 } from "./types";
 
-/** Below this visibility, we don't trust an angle enough to report a number. */
 const MIN_RELIABLE_VISIBILITY = 0.3;
 
 function toZoneLandmark(name: string, lm: NormalizedPoseLandmark): ZoneLandmark {
@@ -38,7 +27,6 @@ function midpointLandmark(
   };
 }
 
-/** Angle at vertex `b` between rays to `a` and `c`, with a confidence-gated result. */
 function jointAngle(
   name: string,
   a: NormalizedPoseLandmark,
@@ -54,7 +42,6 @@ function jointAngle(
   };
 }
 
-/** Lean/tilt of vector b→a from vertical, with a confidence-gated result. */
 function tiltAngle(
   name: string,
   a: NormalizedPoseLandmark,
@@ -89,9 +76,7 @@ export function buildHeadZone(nl: NormalizedPoseLandmark[]): HeadZone {
       toZoneLandmark("rightEar", rightEar),
     ],
     angles: [
-      // Forward/back tilt of the head relative to the torso's vertical axis.
       tiltAngle("headForwardTilt", nose, shoulderMid),
-      // Left/right roll of the head, from the ear-nose-ear angle.
       jointAngle("headRoll", leftEar, nose, rightEar),
     ],
   };
@@ -114,7 +99,6 @@ export function buildTorsoZone(nl: NormalizedPoseLandmark[]): TorsoZone {
       toZoneLandmark("rightHip", rightHip),
     ],
     angles: [
-      // How far the spine leans away from vertical — 0° = perfectly upright.
       tiltAngle("torsoLean", shoulderMid, hipMid),
     ],
   };
@@ -133,9 +117,7 @@ function buildArmZone(nl: NormalizedPoseLandmark[], side: "left" | "right"): Lim
       toZoneLandmark("wrist", wrist),
     ],
     angles: [
-      // How far the upper arm is raised away from the torso (hip-shoulder-elbow).
       jointAngle("shoulderAbduction", hip, shoulder, elbow),
-      // How bent the elbow is (shoulder-elbow-wrist); ~180° = straight arm.
       jointAngle("elbowBend", shoulder, elbow, wrist),
     ],
   };
@@ -154,9 +136,7 @@ function buildLegZone(nl: NormalizedPoseLandmark[], side: "left" | "right"): Lim
       toZoneLandmark("ankle", ankle),
     ],
     angles: [
-      // How far the leg swings forward/back or out from the torso (shoulder-hip-knee).
       jointAngle("hipFlexion", shoulder, hip, knee),
-      // How bent the knee is (hip-knee-ankle); ~180° = straight leg.
       jointAngle("kneeBend", hip, knee, ankle),
     ],
   };

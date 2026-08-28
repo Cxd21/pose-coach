@@ -1,20 +1,8 @@
-/**
- * Top-level entry point for pose similarity scoring: compares a reference
- * pose against a user pose, zone by zone, and aggregates into one overall
- * score. This is the function the rest of the app (and the debug UI) should
- * call — it hides the per-zone comparison mechanics behind one call.
- */
-
 import type { PoseRepresentation } from "@/lib/pose-processing";
 import { resolveScoringConfig } from "./config";
 import { scoreZone } from "./zoneScoring";
 import type { PoseSimilarityResult, PoseSimilarityZones, ScoringConfig, ZoneScore } from "./types";
 
-/**
- * @param reference The target/reference pose (e.g. from a reference photo).
- * @param user The pose to evaluate against the reference (e.g. from a live/uploaded comparison photo).
- * @param configOverrides Optional partial overrides merged on top of DEFAULT_SCORING_CONFIG.
- */
 export function comparePoses(
   reference: PoseRepresentation,
   user: PoseRepresentation,
@@ -33,10 +21,6 @@ export function comparePoses(
 
   const zoneList: ZoneScore[] = Object.values(zones);
 
-  // Overall score: confidence-weighted average of zones that produced a
-  // score at all. A zone with score === null (nothing confident enough to
-  // compare) is excluded rather than counted as 0 — an occluded zone
-  // shouldn't drag down the overall score just because it's occluded.
   const scoredZones = zoneList.filter((z): z is ZoneScore & { score: number } => z.score !== null);
   const overallWeight = scoredZones.reduce((sum, z) => sum + z.confidence, 0);
   const overallScore =
