@@ -16,6 +16,15 @@ const COMPLETING_DURATION_MS = 380;
 /** Duration for the slide-out leave animation before removal. */
 const LEAVE_DURATION_MS = 320;
 
+/** True if both lists have the same items (key + status) in the same order. */
+function areChecklistsEqual(a: ChecklistItem[], b: ChecklistItem[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].key !== b[i].key || a[i].status !== b[i].status) return false;
+  }
+  return true;
+}
+
 /**
  * Manages the dynamic 3-item Focus list:
  * - Up to 3 incomplete body portions visible at once (ranked lowest score first).
@@ -33,7 +42,7 @@ export function useBodyPartChecklist(result: PoseSimilarityResult | null): Check
     if (!result) return;
 
     setItems((prevItems) => {
-      let next = [...prevItems];
+      const next = [...prevItems];
 
       // 1. Check for zones that just reached ≥90%
       for (let i = 0; i < next.length; i++) {
@@ -61,7 +70,12 @@ export function useBodyPartChecklist(result: PoseSimilarityResult | null): Check
         next.push({ key: candidates[i], status: "active" });
       }
 
-      return next;
+      // `result` is a new object every video frame even when nothing
+      // relevant changed, which would otherwise make this effect trigger a
+      // re-render on every single frame (~30-60x/sec). Returning the same
+      // array reference when the list is logically unchanged tells React
+      // to bail out of that re-render instead.
+      return areChecklistsEqual(next, prevItems) ? prevItems : next;
     });
 
     function scheduleLeaving(key: ZoneKey) {
@@ -98,3 +112,4 @@ export function useBodyPartChecklist(result: PoseSimilarityResult | null): Check
 
   return items;
 }
+

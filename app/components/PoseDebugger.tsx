@@ -23,6 +23,9 @@ export default function PoseDebugger() {
     setErrorMessage(null);
     setStatus("loading-model");
     try {
+      // detectFullBodyInImage lazily loads all three models (pose, face,
+      // hand) on first call, so "loading-model" vs "detecting" is
+      // approximate but gives useful feedback on the first run.
       setStatus("detecting");
       const detection = await detectFullBodyInImage(image);
       setResult(detection);
@@ -77,12 +80,7 @@ export default function PoseDebugger() {
   const poseRepresentation = useMemo<PoseRepresentation | null>(() => {
     const primaryPose = result?.poses[0];
     if (!primaryPose) return null;
-    return buildPoseRepresentation(
-      primaryPose,
-      result?.segmentationMask,
-      result?.imageWidth,
-      result?.imageHeight
-    );
+    return buildPoseRepresentation(primaryPose);
   }, [result]);
 
   return (

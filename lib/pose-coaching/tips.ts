@@ -1,3 +1,11 @@
+/**
+ * Rule-based coaching tips: picks the single worst (reliable, not-yet-passed)
+ * zone and returns one short, supportive phrase for it. Deliberately simple
+ * — per the milestone spec, this is a placeholder to improve later with
+ * more targeted, direction-aware guidance (e.g. "raise" vs "lower" derived
+ * from actual angle direction, not just which zone is off).
+ */
+
 import type { PoseSimilarityResult } from "@/lib/pose-scoring";
 import type { ZoneKey } from "./types";
 import { ZONE_KEYS } from "./types";
@@ -28,6 +36,7 @@ const TIPS: Record<ZoneKey, string> = {
 
 const ALL_MATCHED_TIP = "Great! Hold the pose 💗";
 
+/** Returns the reliable, not-yet-passed zone with the lowest score, or null if none (either all passed or all unreliable). */
 export function pickWorstZone(result: PoseSimilarityResult): ZoneKey | null {
   let worst: ZoneKey | null = null;
   let worstScore = Number.POSITIVE_INFINITY;
@@ -55,3 +64,4 @@ export function structuredTipForZone(zone: ZoneKey): CoachingTipData {
 export function tipForAllMatched(): string {
   return ALL_MATCHED_TIP;
 }
+

@@ -1,12 +1,18 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { detectFullBodyInImage } from "@/lib/pose";
-import { buildPoseRepresentation } from "@/lib/pose-processing";
-import type { PoseRepresentation } from "@/lib/pose-processing";
+import { detectPoseInImage } from "@/lib/pose";
+import { buildPoseRepresentation, buildReferenceSilhouette } from "@/lib/pose-processing";
+import type { PoseRepresentation, ReferenceSilhouette } from "@/lib/pose-processing";
+
+export interface ReferencePoseData {
+  representation: PoseRepresentation;
+  /** Real, photo-derived silhouette (faded photo cutout + traced contour) for the fixed overlay guide. */
+  silhouette: ReferenceSilhouette;
+}
 
 export interface ReferencePosePickerProps {
-  onPoseChange: (representation: PoseRepresentation | null, imageUrl: string | null) => void;
+  onPoseChange: (data: ReferencePoseData | null) => void;
 }
 
 type Status = "idle" | "detecting" | "ready" | "error";
@@ -22,7 +28,7 @@ export default function ReferencePosePicker({ onPoseChange }: ReferencePosePicke
       if (!file) return;
 
       setErrorMessage(null);
-      onPoseChange(null, null);
+      onPoseChange(null);
       const objectUrl = URL.createObjectURL(file);
       setPreviewUrl(objectUrl);
       setStatus("detecting");
@@ -30,35 +36,50 @@ export default function ReferencePosePicker({ onPoseChange }: ReferencePosePicke
       const img = new window.Image();
       img.onload = async () => {
         try {
-          const detection = await detectFullBodyInImage(img);
+          // detectPoseInImage (not the combined face+hand detector) is all
+          // we need here — this component only ever used the body pose
+          // landmarks, and this call also gives us the segmentation mask
+          // needed to build a real, photo-shaped silhouette below.
+          const detection = await detectPoseInImage(img);
           const primaryPose = detection.poses[0];
           if (!primaryPose) {
             setStatus("error");
             setErrorMessage("No pose found — try a clearer full-body shot.");
-            onPoseChange(null, null);
+            onPoseChange(null);
             return;
           }
+          if (!detection.segmentationMask) {
+            setStatus("error");
+            setErrorMessage("Couldn't extract a silhouette from that photo. Try another.");
+            onPoseChange(null);
+            return;
+          }
+
+          const representation = buildPoseRepresentation(primaryPose);
+          const silhouette = buildReferenceSilhouette(img, detection.segmentationMask);
+
+          if (silhouette.bounds.width === 0 || silhouette.bounds.height === 0) {
+            setStatus("error");
+            setErrorMessage(
+              "Couldn't get a clean outline from that photo (low contrast with the background?). Try another."
+            );
+            onPoseChange(null);
+            return;
+          }
+
           setStatus("ready");
-          onPoseChange(
-            buildPoseRepresentation(
-              primaryPose,
-              detection.segmentationMask,
-              detection.imageWidth,
-              detection.imageHeight
-            ),
-            objectUrl
-          );
+          onPoseChange({ representation, silhouette });
         } catch (err) {
           console.error(err);
           setStatus("error");
           setErrorMessage("Couldn't read pose. Try another photo.");
-          onPoseChange(null, null);
+          onPoseChange(null);
         }
       };
       img.onerror = () => {
         setStatus("error");
         setErrorMessage("Couldn't load image file.");
-        onPoseChange(null, null);
+        onPoseChange(null);
       };
       img.src = objectUrl;
     },
@@ -94,3 +115,4 @@ export default function ReferencePosePicker({ onPoseChange }: ReferencePosePicke
     </div>
   );
 }
+

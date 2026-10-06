@@ -1,12 +1,166 @@
-import { PoseLandmarkIndex, type NormalizedLandmark } from "@/lib/pose/types";
-import type {
-  PoseRepresentation,
-  ReferenceSilhouette,
-} from "./types";
+/**
+ * Generates and draws an approximate outer-body silhouette guide from a
+ * pose's normalized landmarks.
+ *
+ * MediaPipe's Pose Landmarker only gives us 33 joint points — it has no
+ * concept of body width or an outline. So this builds a *schematic*
+ * silhouette: a circle for the head, a padded polygon for the torso, and
+ * rounded "capsule" (stadium) shapes for each limb segment. It is
+ * intentionally an approximation, not a traced body contour — the goal is
+ * a soft positioning guide, not a pixel-accurate outline.
+ *
+ * Sizing note: this uses fixed proportions (e.g. "arms are this many torso
+ * units wide") rather than the actual reference person's body width, which
+ * we have no way to measure from joint landmarks alone. That's also why
+ * this is drawn using the *viewer's own* live torso scale (see
+ * `SilhouetteProjection` below) rather than the reference photo's original
+ * scale — the guide shows the target pose's shape, resized to fit the
+ * person currently in frame, not an attempt to match their exact build.
+ */
 
-export interface Point2D {
-  x: number;
-  y: number;
+import { PoseLandmarkIndex } from "@/lib/pose/types";
+import type { NormalizedPoseLandmark } from "./types";
+
+export type SilhouetteShape =
+  | { kind: "circle"; cx: number; cy: number; r: number }
+  | { kind: "polygon"; points: { x: number; y: number }[] }
+  | { kind: "capsule"; x1: number; y1: number; x2: number; y2: number; r: number };
+
+/** Maps normalized (torso-unit) coordinates onto canvas pixel coordinates. */
+export interface SilhouetteProjection {
+  /** Canvas-pixel x/y of the (0,0) origin (hip-center) of the normalized pose. */
+  originX: number;
+  originY: number;
+  /** Canvas pixels per one "torso unit". Uniform for x and y (no aspect distortion). */
+  scale: number;
+}
+
+// Approximate body-part widths, in torso units (torso length ≈ 1 unit).
+// These are rough anatomical proportions, not measured from any specific
+// body — see the module doc comment above for why.
+const HEAD_RADIUS_UNITS = 0.42;
+const TORSO_PADDING_FACTOR = 1.2; // how far corners are pushed out from the torso's own centroid
+const ARM_RADIUS_UNITS = 0.09;
+const FOREARM_RADIUS_UNITS = 0.075;
+const THIGH_RADIUS_UNITS = 0.12;
+const SHIN_RADIUS_UNITS = 0.095;
+const NECK_RADIUS_UNITS = 0.08;
+
+function project(lm: NormalizedPoseLandmark, projection: SilhouetteProjection) {
+  return {
+    x: projection.originX + lm.x * projection.scale,
+    y: projection.originY + lm.y * projection.scale,
+  };
+}
+
+function midpoint(a: NormalizedPoseLandmark, b: NormalizedPoseLandmark): NormalizedPoseLandmark {
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+    z: (a.z + b.z) / 2,
+    visibility: Math.min(a.visibility, b.visibility),
+  };
+}
+
+/** Pushes each polygon point outward from the polygon's own centroid, to turn a thin joint-quad into a body-like volume. */
+function padPolygon(points: { x: number; y: number }[], factor: number): { x: number; y: number }[] {
+  const centroid = points.reduce(
+    (acc, p) => ({ x: acc.x + p.x / points.length, y: acc.y + p.y / points.length }),
+    { x: 0, y: 0 }
+  );
+  return points.map((p) => ({
+    x: centroid.x + (p.x - centroid.x) * factor,
+    y: centroid.y + (p.y - centroid.y) * factor,
+  }));
+}
+
+/**
+ * Builds silhouette shapes from a pose's normalized landmarks (the same
+ * `normalizedLandmarks` array on `PoseRepresentation`), projected into
+ * canvas-pixel space via `projection`.
+ */
+export function buildSilhouetteShapes(
+  normalizedLandmarks: NormalizedPoseLandmark[],
+  projection: SilhouetteProjection
+): SilhouetteShape[] {
+  const nl = normalizedLandmarks;
+  const scale = projection.scale;
+
+  const nose = project(nl[PoseLandmarkIndex.NOSE], projection);
+  const leftShoulder = project(nl[PoseLandmarkIndex.LEFT_SHOULDER], projection);
+  const rightShoulder = project(nl[PoseLandmarkIndex.RIGHT_SHOULDER], projection);
+  const leftElbow = project(nl[PoseLandmarkIndex.LEFT_ELBOW], projection);
+  const rightElbow = project(nl[PoseLandmarkIndex.RIGHT_ELBOW], projection);
+  const leftWrist = project(nl[PoseLandmarkIndex.LEFT_WRIST], projection);
+  const rightWrist = project(nl[PoseLandmarkIndex.RIGHT_WRIST], projection);
+  const leftHip = project(nl[PoseLandmarkIndex.LEFT_HIP], projection);
+  const rightHip = project(nl[PoseLandmarkIndex.RIGHT_HIP], projection);
+  const leftKnee = project(nl[PoseLandmarkIndex.LEFT_KNEE], projection);
+  const rightKnee = project(nl[PoseLandmarkIndex.RIGHT_KNEE], projection);
+  const leftAnkle = project(nl[PoseLandmarkIndex.LEFT_ANKLE], projection);
+  const rightAnkle = project(nl[PoseLandmarkIndex.RIGHT_ANKLE], projection);
+
+  const shoulderMid = project(
+    midpoint(nl[PoseLandmarkIndex.LEFT_SHOULDER], nl[PoseLandmarkIndex.RIGHT_SHOULDER]),
+    projection
+  );
+
+  const torsoPolygon = padPolygon(
+    [leftShoulder, rightShoulder, rightHip, leftHip],
+    TORSO_PADDING_FACTOR
+  );
+
+  const capsule = (
+    p1: { x: number; y: number },
+    p2: { x: number; y: number },
+    radiusUnits: number
+  ): SilhouetteShape => ({
+    kind: "capsule",
+    x1: p1.x,
+    y1: p1.y,
+    x2: p2.x,
+    y2: p2.y,
+    r: radiusUnits * scale,
+  });
+
+  return [
+    // Neck connector (visual continuity between head and torso).
+    capsule(shoulderMid, nose, NECK_RADIUS_UNITS),
+    { kind: "circle", cx: nose.x, cy: nose.y, r: HEAD_RADIUS_UNITS * scale },
+    { kind: "polygon", points: torsoPolygon },
+    capsule(leftShoulder, leftElbow, ARM_RADIUS_UNITS),
+    capsule(leftElbow, leftWrist, FOREARM_RADIUS_UNITS),
+    capsule(rightShoulder, rightElbow, ARM_RADIUS_UNITS),
+    capsule(rightElbow, rightWrist, FOREARM_RADIUS_UNITS),
+    capsule(leftHip, leftKnee, THIGH_RADIUS_UNITS),
+    capsule(leftKnee, leftAnkle, SHIN_RADIUS_UNITS),
+    capsule(rightHip, rightKnee, THIGH_RADIUS_UNITS),
+    capsule(rightKnee, rightAnkle, SHIN_RADIUS_UNITS),
+  ];
+}
+
+function traceShapePath(ctx: CanvasRenderingContext2D, shape: SilhouetteShape): void {
+  ctx.beginPath();
+  if (shape.kind === "circle") {
+    ctx.arc(shape.cx, shape.cy, shape.r, 0, Math.PI * 2);
+    return;
+  }
+  if (shape.kind === "polygon") {
+    shape.points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    ctx.closePath();
+    return;
+  }
+  // Capsule: a "stadium" shape — two half-circle end-caps joined by straight sides.
+  const { x1, y1, x2, y2, r } = shape;
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  const perpX = Math.cos(angle + Math.PI / 2) * r;
+  const perpY = Math.sin(angle + Math.PI / 2) * r;
+  ctx.moveTo(x1 + perpX, y1 + perpY);
+  ctx.lineTo(x2 + perpX, y2 + perpY);
+  ctx.arc(x2, y2, r, angle + Math.PI / 2, angle - Math.PI / 2, true);
+  ctx.lineTo(x1 - perpX, y1 - perpY);
+  ctx.arc(x1, y1, r, angle - Math.PI / 2, angle + Math.PI / 2, true);
+  ctx.closePath();
 }
 
 export interface SilhouetteDrawOptions {
@@ -18,345 +172,64 @@ export interface SilhouetteDrawOptions {
   dash?: number[];
 }
 
-export const DEFAULT_SILHOUETTE_OPTIONS: Required<SilhouetteDrawOptions> = {
-  fillColor: "#ffffff",
-  fillOpacity: 0.25, // Soft translucent ghost fill (25%)
-  outlineColor: "#ffffff",
-  outlineOpacity: 0.75, // Crisp dashed outer outline (75%)
-  outlineWidth: 1.75,
+const DEFAULT_SILHOUETTE_OPTIONS: Required<SilhouetteDrawOptions> = {
+  fillColor: "#d1d5db", // gray-300
+  fillOpacity: 0.5,
+  outlineColor: "#9ca3af", // gray-400
+  outlineOpacity: 0.75,
+  outlineWidth: 1.5,
   dash: [6, 5],
 };
 
-function chaikinSmooth(points: Point2D[]): Point2D[] {
-  if (points.length < 3) return points;
-  const result: Point2D[] = [];
-  const len = points.length;
-
-  for (let i = 0; i < len; i++) {
-    const p0 = points[i];
-    const p1 = points[(i + 1) % len];
-
-    result.push({
-      x: 0.75 * p0.x + 0.25 * p1.x,
-      y: 0.75 * p0.y + 0.25 * p1.y,
-    });
-    result.push({
-      x: 0.25 * p0.x + 0.75 * p1.x,
-      y: 0.25 * p0.y + 0.75 * p1.y,
-    });
-  }
-
-  return result;
-}
-
-function getPerpUnit(p1: Point2D, p2: Point2D): Point2D {
-  const dx = p2.x - p1.x;
-  const dy = p2.y - p1.y;
-  const len = Math.hypot(dx, dy) || 1;
-  return { x: -dy / len, y: dx / len };
-}
-
-function getUnit(p1: Point2D, p2: Point2D): Point2D {
-  const dx = p2.x - p1.x;
-  const dy = p2.y - p1.y;
-  const len = Math.hypot(dx, dy) || 1;
-  return { x: dx / len, y: dy / len };
-}
-
 /**
- * Builds the SINGLE unified outer human body perimeter contour from reference landmarks.
- * Strictly contains NO internal lines, NO joint circles, and NO skeletal connections.
- */
-export function buildOuterContour(
-  landmarks: NormalizedLandmark[],
-  refWidth: number = 1000,
-  refHeight: number = 1000
-): ReferenceSilhouette {
-  const getLm = (idx: PoseLandmarkIndex): Point2D => ({
-    x: landmarks[idx].x,
-    y: landmarks[idx].y,
-  });
-
-  const isVis = (idx: PoseLandmarkIndex): boolean => {
-    const lm = landmarks[idx];
-    return !!lm && (lm.visibility === undefined || lm.visibility >= 0.25) && lm.y <= 1.05;
-  };
-
-  const lShoulder = getLm(PoseLandmarkIndex.LEFT_SHOULDER);
-  const rShoulder = getLm(PoseLandmarkIndex.RIGHT_SHOULDER);
-  const lHip = getLm(PoseLandmarkIndex.LEFT_HIP);
-  const rHip = getLm(PoseLandmarkIndex.RIGHT_HIP);
-  const nose = getLm(PoseLandmarkIndex.NOSE);
-  const lEar = getLm(PoseLandmarkIndex.LEFT_EAR);
-  const rEar = getLm(PoseLandmarkIndex.RIGHT_EAR);
-  const rElbow = getLm(PoseLandmarkIndex.RIGHT_ELBOW);
-  const rWrist = getLm(PoseLandmarkIndex.RIGHT_WRIST);
-  const lElbow = getLm(PoseLandmarkIndex.LEFT_ELBOW);
-  const lWrist = getLm(PoseLandmarkIndex.LEFT_WRIST);
-
-  const torsoLen =
-    Math.hypot(lShoulder.x - lHip.x, lShoulder.y - lHip.y) || 0.28;
-
-  const headRadius = Math.max(
-    torsoLen * 0.26,
-    Math.hypot(lEar.x - rEar.x, lEar.y - rEar.y) * 0.85
-  );
-
-  // 1. Head & Neck outer boundary
-  const headTop: Point2D = {
-    x: (lEar.x + rEar.x + nose.x) / 3,
-    y: Math.min(nose.y, lEar.y, rEar.y) - headRadius * 0.95,
-  };
-  const headRight: Point2D = { x: rEar.x + headRadius * 0.35, y: rEar.y };
-  const headLeft: Point2D = { x: lEar.x - headRadius * 0.35, y: lEar.y };
-
-  // 2. Right Arm Perimeter Normals
-  const rUpperNorm = getPerpUnit(rShoulder, rElbow);
-  const rUpperDist = torsoLen * 0.085;
-  const rForeNorm = getPerpUnit(rElbow, rWrist);
-  const rForeDist = torsoLen * 0.065;
-  const rHandDir = getUnit(rElbow, rWrist);
-
-  const rShoulderOut: Point2D = {
-    x: rShoulder.x + rUpperNorm.x * rUpperDist,
-    y: rShoulder.y + rUpperNorm.y * rUpperDist - torsoLen * 0.03,
-  };
-  const rElbowOut: Point2D = {
-    x: rElbow.x + rUpperNorm.x * rUpperDist,
-    y: rElbow.y + rUpperNorm.y * rUpperDist,
-  };
-  const rWristOut: Point2D = {
-    x: rWrist.x + rForeNorm.x * rForeDist,
-    y: rWrist.y + rForeNorm.y * rForeDist,
-  };
-  const rHandTip: Point2D = {
-    x: rWrist.x + rHandDir.x * (torsoLen * 0.08),
-    y: rWrist.y + rHandDir.y * (torsoLen * 0.08),
-  };
-  const rArmpit: Point2D = {
-    x: rShoulder.x * 0.65 + rElbow.x * 0.35 - rUpperNorm.x * (torsoLen * 0.04),
-    y: rShoulder.y * 0.65 + rElbow.y * 0.35 - rUpperNorm.y * (torsoLen * 0.04),
-  };
-
-  // 3. Right Flank & Right Leg
-  const rWaist: Point2D = {
-    x: rHip.x + torsoLen * 0.08,
-    y: (rShoulder.y + rHip.y * 2) / 3,
-  };
-  const rHipOut: Point2D = {
-    x: rHip.x + torsoLen * 0.10,
-    y: rHip.y,
-  };
-
-  const rightLegVisible = isVis(PoseLandmarkIndex.RIGHT_KNEE);
-  const leftLegVisible = isVis(PoseLandmarkIndex.LEFT_KNEE);
-
-  // Construct clock-wise perimeter
-  const perimeter: Point2D[] = [
-    headTop,
-    headRight,
-    rShoulderOut,
-    rElbowOut,
-    rWristOut,
-    rHandTip,
-    rArmpit,
-    rWaist,
-    rHipOut,
-  ];
-
-  if (rightLegVisible) {
-    const rKnee = getLm(PoseLandmarkIndex.RIGHT_KNEE);
-    const rThighNorm = getPerpUnit(rHip, rKnee);
-    const rThighDist = torsoLen * 0.10;
-    const rKneeOut: Point2D = {
-      x: rKnee.x + rThighNorm.x * rThighDist,
-      y: rKnee.y + rThighNorm.y * rThighDist,
-    };
-    perimeter.push(rKneeOut);
-
-    if (isVis(PoseLandmarkIndex.RIGHT_ANKLE)) {
-      const rAnkle = getLm(PoseLandmarkIndex.RIGHT_ANKLE);
-      const rShinNorm = getPerpUnit(rKnee, rAnkle);
-      const rShinDist = torsoLen * 0.08;
-      const rAnkleOut: Point2D = {
-        x: rAnkle.x + rShinNorm.x * rShinDist,
-        y: rAnkle.y + rShinNorm.y * rShinDist,
-      };
-      const rFoot = isVis(PoseLandmarkIndex.RIGHT_FOOT_INDEX)
-        ? getLm(PoseLandmarkIndex.RIGHT_FOOT_INDEX)
-        : { x: rAnkle.x, y: rAnkle.y + torsoLen * 0.05 };
-      perimeter.push(rAnkleOut, rFoot);
-    }
-  }
-
-  // Pelvis / Groin connection
-  const groin: Point2D = {
-    x: (lHip.x + rHip.x) / 2,
-    y:
-      (lHip.y + rHip.y) / 2 +
-      (rightLegVisible || leftLegVisible ? torsoLen * 0.10 : torsoLen * 0.04),
-  };
-  perimeter.push(groin);
-
-  // Left Leg
-  if (leftLegVisible) {
-    const lKnee = getLm(PoseLandmarkIndex.LEFT_KNEE);
-    const lThighNorm = getPerpUnit(lHip, lKnee);
-    const lThighDist = torsoLen * 0.10;
-
-    if (isVis(PoseLandmarkIndex.LEFT_ANKLE)) {
-      const lAnkle = getLm(PoseLandmarkIndex.LEFT_ANKLE);
-      const lShinNorm = getPerpUnit(lKnee, lAnkle);
-      const lShinDist = torsoLen * 0.08;
-      const lFoot = isVis(PoseLandmarkIndex.LEFT_FOOT_INDEX)
-        ? getLm(PoseLandmarkIndex.LEFT_FOOT_INDEX)
-        : { x: lAnkle.x, y: lAnkle.y + torsoLen * 0.05 };
-      const lAnkleOut: Point2D = {
-        x: lAnkle.x - lShinNorm.x * lShinDist,
-        y: lAnkle.y - lShinNorm.y * lShinDist,
-      };
-      perimeter.push(lFoot, lAnkleOut);
-    }
-
-    const lKneeOut: Point2D = {
-      x: lKnee.x - lThighNorm.x * lThighDist,
-      y: lKnee.y - lThighNorm.y * lThighDist,
-    };
-    perimeter.push(lKneeOut);
-  }
-
-  // Left Flank & Left Arm
-  const lHipOut: Point2D = {
-    x: lHip.x - torsoLen * 0.10,
-    y: lHip.y,
-  };
-  const lWaist: Point2D = {
-    x: lHip.x - torsoLen * 0.08,
-    y: (lShoulder.y + lHip.y * 2) / 3,
-  };
-
-  const lUpperNorm = getPerpUnit(lShoulder, lElbow);
-  const lUpperDist = torsoLen * 0.085;
-  const lForeNorm = getPerpUnit(lElbow, lWrist);
-  const lForeDist = torsoLen * 0.065;
-  const lHandDir = getUnit(lElbow, lWrist);
-
-  const lArmpit: Point2D = {
-    x: lShoulder.x * 0.65 + lElbow.x * 0.35 + lUpperNorm.x * (torsoLen * 0.04),
-    y: lShoulder.y * 0.65 + lElbow.y * 0.35 + lUpperNorm.y * (torsoLen * 0.04),
-  };
-  const lHandTip: Point2D = {
-    x: lWrist.x + lHandDir.x * (torsoLen * 0.08),
-    y: lWrist.y + lHandDir.y * (torsoLen * 0.08),
-  };
-  const lWristOut: Point2D = {
-    x: lWrist.x - lForeNorm.x * lForeDist,
-    y: lWrist.y - lForeNorm.y * lForeDist,
-  };
-  const lElbowOut: Point2D = {
-    x: lElbow.x - lUpperNorm.x * lUpperDist,
-    y: lElbow.y - lUpperNorm.y * lUpperDist,
-  };
-  const lShoulderOut: Point2D = {
-    x: lShoulder.x - lUpperNorm.x * lUpperDist,
-    y: lShoulder.y - lUpperNorm.y * lUpperDist - torsoLen * 0.03,
-  };
-
-  perimeter.push(
-    lHipOut,
-    lWaist,
-    lArmpit,
-    lHandTip,
-    lWristOut,
-    lElbowOut,
-    lShoulderOut,
-    headLeft
-  );
-
-  // Smooth the closed single-loop perimeter
-  const smoothed = chaikinSmooth(chaikinSmooth(chaikinSmooth(perimeter)));
-
-  return {
-    contours: [smoothed],
-    width: refWidth,
-    height: refHeight,
-  };
-}
-
-export function extractSilhouetteFromMask(
-  _maskData: Float32Array | null,
-  _maskWidth: number,
-  _maskHeight: number,
-  rawLandmarks: NormalizedLandmark[],
-  refWidth: number = 1000,
-  refHeight: number = 1000,
-  _threshold: number = 0.4
-): ReferenceSilhouette {
-  return buildOuterContour(rawLandmarks, refWidth, refHeight);
-}
-
-export function buildFallbackSilhouette(
-  rawLandmarks: NormalizedLandmark[],
-  refWidth: number = 1000,
-  refHeight: number = 1000
-): ReferenceSilhouette {
-  return buildOuterContour(rawLandmarks, refWidth, refHeight);
-}
-
-/**
- * Draws the STATIC reference outer body silhouette onto the camera canvas.
- * Renders ONLY the outer perimeter boundary (dashed line) and solid translucent interior fill.
- * Strictly free of skeleton lines, bones, circles, and landmark dots.
+ * Draws the silhouette shapes onto a canvas: a uniformly semi-transparent
+ * fill (composited via an offscreen buffer so overlapping shapes don't
+ * darken at their seams) plus a dashed outline per shape.
+ *
+ * Note: the dashed line is traced per-shape rather than as one merged
+ * outer contour, so at spots where two shapes overlap (e.g. torso and
+ * upper arm) you may see a faint internal dashed seam. That's an accepted
+ * trade-off for keeping this dependency-free — real contour extraction
+ * would need an image-processing step (e.g. marching squares) that isn't
+ * warranted for a soft positioning guide.
  */
 export function drawSilhouette(
   ctx: CanvasRenderingContext2D,
-  pose: PoseRepresentation,
-  viewportWidth: number,
-  viewportHeight: number,
+  shapes: SilhouetteShape[],
   options: SilhouetteDrawOptions = {}
 ): void {
   const opts = { ...DEFAULT_SILHOUETTE_OPTIONS, ...options };
-  const silhouette = pose.silhouette;
-  if (!silhouette || silhouette.contours.length === 0) return;
+  const targetCanvas = ctx.canvas;
 
-  const refW = silhouette.width > 0 ? silhouette.width : viewportWidth;
-  const refH = silhouette.height > 0 ? silhouette.height : viewportHeight;
-
-  // Uniform aspect contain scaling: fits inside viewport without stretching
-  const scale = Math.min(viewportWidth / refW, viewportHeight / refH);
-  const drawW = refW * scale;
-  const drawH = refH * scale;
-  const offsetX = (viewportWidth - drawW) / 2;
-  const offsetY = (viewportHeight - drawH) / 2;
-
-  ctx.save();
-  for (const contour of silhouette.contours) {
-    if (contour.length < 3) continue;
-
-    ctx.beginPath();
-    for (let i = 0; i < contour.length; i++) {
-      const px = offsetX + contour[i].x * drawW;
-      const py = offsetY + contour[i].y * drawH;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
+  // Fill: render fully opaque onto an offscreen canvas first, then
+  // composite that whole buffer at once with a single globalAlpha, so
+  // overlapping shapes read as one uniform-opacity silhouette instead of
+  // stacking alpha at the seams.
+  const offscreen = document.createElement("canvas");
+  offscreen.width = targetCanvas.width;
+  offscreen.height = targetCanvas.height;
+  const offCtx = offscreen.getContext("2d");
+  if (offCtx) {
+    offCtx.fillStyle = opts.fillColor;
+    for (const shape of shapes) {
+      traceShapePath(offCtx, shape);
+      offCtx.fill();
     }
-    ctx.closePath();
-
-    // 1. Soft translucent ghost interior fill (NO internal lines or shapes)
     ctx.save();
-    ctx.fillStyle = opts.fillColor;
     ctx.globalAlpha = opts.fillOpacity;
-    ctx.fill();
+    ctx.drawImage(offscreen, 0, 0);
     ctx.restore();
+  }
 
-    // 2. Subtle dashed outer contour stroke along perimeter ONLY
-    ctx.save();
-    ctx.setLineDash(opts.dash);
-    ctx.strokeStyle = opts.outlineColor;
-    ctx.lineWidth = opts.outlineWidth;
-    ctx.globalAlpha = opts.outlineOpacity;
+  // Dashed outline, per shape.
+  ctx.save();
+  ctx.setLineDash(opts.dash);
+  ctx.strokeStyle = opts.outlineColor;
+  ctx.lineWidth = opts.outlineWidth;
+  ctx.globalAlpha = opts.outlineOpacity;
+  for (const shape of shapes) {
+    traceShapePath(ctx, shape);
     ctx.stroke();
-    ctx.restore();
   }
   ctx.restore();
 }

@@ -10,12 +10,24 @@ import type { PoseSimilarityResult } from "@/lib/pose-scoring";
 export interface UsePoseCoachingLoopResult {
   /** Latest similarity result, or null if no person is currently detected (or no reference pose is set yet). */
   result: PoseSimilarityResult | null;
-  /** The live user's own normalized pose representation this frame. Null when nobody is detected. */
+  /** The live user's own normalized pose representation this frame — used to position/scale the silhouette guide. Null when nobody is detected. */
   userPose: PoseRepresentation | null;
   /** True once at least one detection pass has run without finding a person in the current frame. */
   personDetected: boolean;
 }
 
+/**
+ * Runs a continuous detection → normalize → compare loop against the given
+ * video element, once a reference pose is available.
+ *
+ * Every step here reuses existing, unmodified logic:
+ * - `detectPoseInVideoFrame` (lib/pose/landmarker.ts) — the video-mode
+ *   sibling of the existing image detection, added for this milestone but
+ *   sharing the same model/runtime.
+ * - `buildPoseRepresentation` (lib/pose-processing) — unchanged from the
+ *   normalization milestone.
+ * - `comparePoses` (lib/pose-scoring) — unchanged from the scoring milestone.
+ */
 export function usePoseCoachingLoop(
   videoRef: React.RefObject<HTMLVideoElement | null>,
   referencePose: PoseRepresentation | null,
@@ -58,6 +70,7 @@ export function usePoseCoachingLoop(
             setResult(comparePoses(reference, userRepresentation, { passThreshold }));
           }
         } catch (err) {
+          // A single bad frame shouldn't crash the loop — log and keep going.
           console.error("Pose detection error on live frame:", err);
         }
       }

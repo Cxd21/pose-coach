@@ -9,9 +9,16 @@ type Status = "idle" | "loading-model" | "detecting" | "done" | "error";
 
 export interface PoseUploadSlotProps {
   label: string;
+  /** Called with the normalized pose representation whenever a new detection completes, or null on error/no-pose-found. */
   onPoseChange: (representation: PoseRepresentation | null) => void;
 }
 
+/**
+ * Upload an image, run the existing detection + normalization pipeline on
+ * it, and report the resulting PoseRepresentation up to the parent. Used
+ * twice by PoseScoringDebugger (reference slot + comparison slot) so the
+ * upload/detect/draw logic isn't duplicated between them.
+ */
 export default function PoseUploadSlot({ label, onPoseChange }: PoseUploadSlotProps) {
   const [status, setStatus] = useState<Status>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -38,14 +45,7 @@ export default function PoseUploadSlot({ label, onPoseChange }: PoseUploadSlotPr
           setErrorMessage("No pose detected. Try a clearer, fully-visible photo.");
           onPoseChange(null);
         } else {
-          onPoseChange(
-            buildPoseRepresentation(
-              primaryPose,
-              detection.segmentationMask,
-              detection.imageWidth,
-              detection.imageHeight
-            )
-          );
+          onPoseChange(buildPoseRepresentation(primaryPose));
         }
         setStatus("done");
       } catch (err) {

@@ -8,16 +8,15 @@ import { useBodyPartChecklist } from "./useBodyPartChecklist";
 import { useCoachingTip } from "./useCoachingTip";
 import { useAutoCapture } from "./useAutoCapture";
 import ReferencePosePicker from "./ReferencePosePicker";
+import type { ReferencePoseData } from "./ReferencePosePicker";
 import SilhouetteOverlay from "./SilhouetteOverlay";
 import BodyPartChecklist from "./BodyPartChecklist";
-import PoseResultScreen from "./PoseResultScreen";
-import type { PoseRepresentation } from "@/lib/pose-processing";
-import type { PoseSimilarityResult } from "@/lib/pose-scoring";
+import type { PoseRepresentation, ReferenceSilhouette } from "@/lib/pose-processing";
 import { DEFAULT_SCORING_CONFIG } from "@/lib/pose-scoring";
 
 type CaptureMode = "auto" | "manual";
 
-/** Grabs the current video frame as a data URL, flipped to match the mirrored preview the user saw. */
+/** Grabs the current video frame as a data URL, flipped to match the mirrored preview the user actually saw. */
 function captureFrame(video: HTMLVideoElement): string {
   const canvas = document.createElement("canvas");
   canvas.width = video.videoWidth;
@@ -37,12 +36,15 @@ export default function LiveCoach() {
     errorMessage: cameraError,
     requestCamera,
   } = useCameraStream();
-
   const [referencePose, setReferencePose] = useState<PoseRepresentation | null>(null);
+  const [referenceSilhouette, setReferenceSilhouette] = useState<ReferenceSilhouette | null>(null);
   const [mode, setMode] = useState<CaptureMode>("auto");
   const [capturedPhotoUrl, setCapturedPhotoUrl] = useState<string | null>(null);
-  const [capturedResult, setCapturedResult] = useState<PoseSimilarityResult | null>(null);
-  const [showResultScreen, setShowResultScreen] = useState(false);
+
+  const handleReferenceChange = useCallback((data: ReferencePoseData | null) => {
+    setReferencePose(data?.representation ?? null);
+    setReferenceSilhouette(data?.silhouette ?? null);
+  }, []);
 
   const isStreaming = cameraStatus === "streaming";
 
@@ -58,35 +60,11 @@ export default function LiveCoach() {
 
   const handleCapture = useCallback(() => {
     const video = videoRef.current;
-    if (!video || video.videoWidth === 0 || video.videoHeight === 0) return;
-    const photo = captureFrame(video);
-    setCapturedPhotoUrl(photo);
-    setCapturedResult(result);
-    setShowResultScreen(false);
-  }, [videoRef, result]);
+    if (!video) return;
+    setCapturedPhotoUrl(captureFrame(video));
+  }, [videoRef]);
 
-  const { countdown } = useAutoCapture(
-    result,
-    mode === "auto" && isStreaming && !capturedPhotoUrl,
-    handleCapture,
-    1000 // 1 second stability hold requirement
-  );
-
-  const handleRetake = useCallback(() => {
-    setCapturedPhotoUrl(null);
-    setCapturedResult(null);
-    setShowResultScreen(false);
-  }, []);
-
-  const handleUsePhoto = useCallback(() => {
-    setShowResultScreen(true);
-  }, []);
-
-  const handleDone = useCallback(() => {
-    setCapturedPhotoUrl(null);
-    setCapturedResult(null);
-    setShowResultScreen(false);
-  }, []);
+  useAutoCapture(result, mode === "auto" && isStreaming && !capturedPhotoUrl, handleCapture);
 
   const overallScore = result ? Math.round(result.overallScore) : 0;
 
@@ -118,12 +96,7 @@ export default function LiveCoach() {
         </div>
 
         <div className="flex items-center gap-2">
-          <ReferencePosePicker
-            onPoseChange={(representation) => {
-              setReferencePose(representation);
-              handleRetake();
-            }}
-          />
+          <ReferencePosePicker onPoseChange={handleReferenceChange} />
           <button
             type="button"
             aria-label="Settings"
@@ -145,24 +118,38 @@ export default function LiveCoach() {
         </div>
       </header>
 
-      {/* Main View Area */}
-      {showResultScreen && capturedPhotoUrl ? (
-        /* Result Screen */
-        <PoseResultScreen
-          photoUrl={capturedPhotoUrl}
-          referencePose={referencePose}
-          result={capturedResult}
-          onRetake={handleRetake}
-          onDone={handleDone}
-        />
-      ) : (
-        /* Camera Viewport / Live Coaching / Capture Preview */
-        <>
-          <div
-            className="relative overflow-hidden rounded-[32px] bg-neutral-950 shadow-lg border border-neutral-200/50"
-            style={{ aspectRatio: "3 / 4" }}
-          >
-            {/* Mirrored Camera Stream (always mounted to preserve stream attachment and eliminate black screen on retake) */}
+      {/* Main Camera Viewport */}
+      <div
+        className="relative overflow-hidden rounded-[32px] bg-neutral-950 shadow-lg border border-neutral-200/50"
+        style={{ aspectRatio: "3 / 4" }}
+      >
+        {capturedPhotoUrl ? (
+          <div className="relative h-full w-full">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={capturedPhotoUrl}
+              alt="Captured pose"
+              className="h-full w-full object-cover"
+            />
+            <div className="absolute inset-x-0 bottom-6 flex justify-center gap-3">
+              <button
+                onClick={() => setCapturedPhotoUrl(null)}
+                className="rounded-full bg-white/90 backdrop-blur-md px-6 py-2.5 text-sm font-semibold text-neutral-800 shadow-md hover:bg-white transition-all active:scale-95"
+              >
+                Retake
+              </button>
+              <a
+                href={capturedPhotoUrl}
+                download="pose-capture.png"
+                className="rounded-full bg-pink-500 px-6 py-2.5 text-sm font-semibold text-white shadow-md hover:bg-pink-600 transition-all active:scale-95 flex items-center gap-1.5"
+              >
+                Save
+              </a>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Mirrored Camera Stream */}
             <div className="absolute inset-0 -scale-x-100">
               <video
                 ref={videoRef}
@@ -173,27 +160,15 @@ export default function LiveCoach() {
               />
             </div>
 
-            {/* Locked Reference Outer Silhouette (active during live streaming) */}
-            {isStreaming && referencePose && !capturedPhotoUrl && (
+            {/* Locked Reference Outer Silhouette (fixed target overlay) */}
+            {referenceSilhouette && (
               <div className="absolute inset-0 -scale-x-100 pointer-events-none">
-                <SilhouetteOverlay videoRef={videoRef} referencePose={referencePose} />
+                <SilhouetteOverlay videoRef={videoRef} silhouette={referenceSilhouette} />
               </div>
             )}
 
-            {/* Auto-Capture Visual Countdown Overlay */}
-            {!capturedPhotoUrl && countdown !== null && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/25 backdrop-blur-[2px] z-20 pointer-events-none transition-all">
-                <div className="flex h-24 w-24 items-center justify-center rounded-full bg-white/95 shadow-2xl border-4 border-pink-400 animate-bounce">
-                  <span className="text-5xl font-black text-pink-500">{countdown}</span>
-                </div>
-                <p className="mt-3 rounded-full bg-pink-500/90 px-4 py-1.5 text-xs font-bold text-white shadow-md backdrop-blur-sm">
-                  Hold pose! Capturing in {countdown}s ✨
-                </p>
-              </div>
-            )}
-
-            {/* Top-Left: Overall Similarity Card (live coaching only) */}
-            {isStreaming && referencePose && result && !capturedPhotoUrl && (
+            {/* Top-Left: Overall Similarity Card */}
+            {isStreaming && referencePose && result && (
               <div className="absolute left-4 top-4 flex items-center gap-2 rounded-2xl bg-white/90 px-3.5 py-2 shadow-sm backdrop-blur-md border border-white/60">
                 <span className="text-xl text-pink-500">♡</span>
                 <div className="flex flex-col">
@@ -207,24 +182,21 @@ export default function LiveCoach() {
               </div>
             )}
 
-            {/* Left: Dynamic 3-item Focus List (live coaching only) */}
-            {isStreaming && referencePose && !capturedPhotoUrl && (
-              <div className="absolute left-4 top-20 flex flex-col items-start gap-1.5 pointer-events-none">
-                <span className="text-[11px] font-semibold text-neutral-600 px-1">
-                  Focus on <span className="text-pink-500">⌒</span>
-                </span>
+            {/* Left: Dynamic 3-item Focus List (icon + name only) */}
+            {isStreaming && referencePose && checklistItems.length > 0 && (
+              <div className="absolute left-4 top-20">
                 <BodyPartChecklist items={checklistItems} />
               </div>
             )}
 
-            {/* Bottom-Right: Minimal Real-Time Tip Bubble (live coaching only) */}
-            {isStreaming && referencePose && tipState && tipState.text && !capturedPhotoUrl && (
-              <div className="absolute right-4 bottom-24 max-w-[200px] rounded-2xl bg-white/90 p-3 shadow-md backdrop-blur-md border border-white/60">
-                <div className="flex items-center gap-1 text-[11px] font-bold text-amber-500">
-                  <span>✨</span>
+            {/* Right: Speech Bubble Coaching Tip */}
+            {isStreaming && referencePose && personDetected && tipState && (
+              <div className="absolute right-4 bottom-24 max-w-[175px] rounded-3xl bg-white/90 p-3 shadow-md backdrop-blur-md border border-white/60 text-xs">
+                <div className="flex items-center gap-1 text-[11px] font-bold text-neutral-700">
+                  <span className="text-pink-400">✨</span>
                   <span>Tip</span>
                 </div>
-                <p className="mt-1 text-xs text-neutral-700 leading-tight font-medium">
+                <p className="mt-1 text-neutral-700 leading-snug">
                   {tipState.structured ? (
                     <>
                       {tipState.structured.prefix}{" "}
@@ -244,20 +216,19 @@ export default function LiveCoach() {
             )}
 
             {/* Edge Cases & Status Overlays */}
-            {cameraStatus === "error" && !capturedPhotoUrl && (
+            {cameraStatus === "error" && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-neutral-900/90 p-6 text-center">
                 <p className="text-sm text-white">{cameraError}</p>
                 <button
-                  type="button"
                   onClick={requestCamera}
-                  className="rounded-full bg-pink-500 px-5 py-2 text-sm font-semibold text-white shadow-md hover:bg-pink-600 transition-colors cursor-pointer"
+                  className="rounded-full bg-pink-500 px-5 py-2 text-sm font-semibold text-white shadow-md hover:bg-pink-600 transition-colors"
                 >
                   Enable camera access
                 </button>
               </div>
             )}
 
-            {isStreaming && !referencePose && !capturedPhotoUrl && (
+            {isStreaming && !referencePose && (
               <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
                 <div className="rounded-2xl bg-white/90 px-5 py-3 shadow-sm backdrop-blur-md border border-white/60">
                   <p className="text-xs font-semibold text-neutral-700">
@@ -267,7 +238,7 @@ export default function LiveCoach() {
               </div>
             )}
 
-            {isStreaming && referencePose && !personDetected && !capturedPhotoUrl && (
+            {isStreaming && referencePose && !personDetected && (
               <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
                 <p className="rounded-full bg-white/90 px-5 py-2 text-xs font-semibold text-neutral-700 shadow-sm backdrop-blur-md border border-white/60">
                   Step into frame ✨
@@ -275,10 +246,10 @@ export default function LiveCoach() {
               </div>
             )}
 
-            {/* Bottom Controls Bar (live coaching only) */}
-            {isStreaming && referencePose && !capturedPhotoUrl && (
+            {/* Bottom Controls Bar */}
+            {isStreaming && referencePose && (
               <div className="absolute inset-x-4 bottom-4 flex items-center justify-between">
-                {/* Auto / Manual Mode Toggle */}
+                {/* Auto Mode Toggle Pill */}
                 <button
                   type="button"
                   onClick={() => setMode((m) => (m === "auto" ? "manual" : "auto"))}
@@ -301,22 +272,20 @@ export default function LiveCoach() {
 
                 {/* Central Shutter Button */}
                 <button
-                  type="button"
                   onClick={handleCapture}
                   aria-label="Capture photo"
-                  className="relative flex h-16 w-16 items-center justify-center rounded-full border-4 border-white bg-pink-500 shadow-xl transition-transform active:scale-90 hover:scale-105 cursor-pointer"
+                  className="relative flex h-16 w-16 items-center justify-center rounded-full border-4 border-white bg-pink-500 shadow-xl transition-transform active:scale-90 hover:scale-105"
                 >
                   <div className="h-12 w-12 rounded-full bg-pink-400/90 border border-white/40" />
                 </button>
 
-                {/* Manual Capture Button */}
+                {/* Manual Mode Indicator / Pill */}
                 <button
                   type="button"
-                  onClick={handleCapture}
-                  aria-label="Manual Capture"
-                  className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold shadow-sm backdrop-blur-md border transition-colors cursor-pointer active:scale-95 ${
+                  onClick={() => setMode("manual")}
+                  className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold shadow-sm backdrop-blur-md border transition-colors ${
                     mode === "manual"
-                      ? "bg-pink-100 text-pink-700 border-pink-300"
+                      ? "bg-pink-100 text-pink-600 border-pink-300"
                       : "bg-white/90 text-neutral-700 border-white/60 hover:bg-white"
                   }`}
                 >
@@ -325,50 +294,18 @@ export default function LiveCoach() {
                 </button>
               </div>
             )}
+          </>
+        )}
+      </div>
 
-            {/* Captured Photo Preview Overlay */}
-            {capturedPhotoUrl && (
-              <div className="absolute inset-0 z-10 bg-neutral-950 animate-in fade-in duration-150">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={capturedPhotoUrl}
-                  alt="Captured pose preview"
-                  className="h-full w-full object-cover"
-                />
-
-                {/* Action Buttons: Retake and Use Photo */}
-                <div className="absolute inset-x-0 bottom-6 flex justify-center items-center gap-3 px-4 z-20">
-                  <button
-                    type="button"
-                    onClick={handleRetake}
-                    className="rounded-full bg-white/90 backdrop-blur-md px-6 py-2.5 text-sm font-semibold text-neutral-800 shadow-md hover:bg-white transition-all active:scale-95 cursor-pointer"
-                  >
-                    Retake
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleUsePhoto}
-                    className="rounded-full bg-pink-500 px-6 py-2.5 text-sm font-semibold text-white shadow-md hover:bg-pink-600 transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
-                  >
-                    <span>Use Photo</span>
-                    <span>✨</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Bottom Subtext */}
-          <footer className="text-center">
-            <p className="flex items-center justify-center gap-1 text-[11px] font-medium text-neutral-500">
-              <span className="text-pink-400">✨</span>
-              {mode === "auto"
-                ? "Auto capture when all zones reach ≥90% for 1s"
-                : "Manual mode: Click shutter or Manual button to capture"}
-            </p>
-          </footer>
-        </>
-      )}
+      {/* Bottom Subtext */}
+      <footer className="text-center">
+        <p className="flex items-center justify-center gap-1 text-[11px] font-medium text-neutral-500">
+          <span className="text-pink-400">✨</span>
+          Auto capture when everything is above 90% for 1 second
+        </p>
+      </footer>
     </div>
   );
 }
+

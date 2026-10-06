@@ -1,4 +1,13 @@
-import type { NormalizedLandmark, RawSegmentationMask } from "@/lib/pose/types";
+/**
+ * Main entry point for pose-processing: converts MediaPipe's raw 33-point
+ * pose landmarks into a normalized, zone-structured representation.
+ *
+ * This is the function other code (UI, and later, pose-comparison logic)
+ * should call — it hides the two internal steps (normalize, then build
+ * zones) behind one call and one result shape.
+ */
+
+import type { NormalizedLandmark } from "@/lib/pose/types";
 import { normalizePoseLandmarks } from "./normalize";
 import {
   buildHeadZone,
@@ -8,33 +17,15 @@ import {
   buildLeftLegZone,
   buildRightLegZone,
 } from "./zones";
-import { extractSilhouetteFromMask, buildFallbackSilhouette } from "./silhouette";
-import type { PoseRepresentation, ReferenceSilhouette } from "./types";
+import type { PoseRepresentation } from "./types";
 
-export function buildPoseRepresentation(
-  landmarks: NormalizedLandmark[],
-  segmentationMask?: RawSegmentationMask | null,
-  imageWidth?: number,
-  imageHeight?: number
-): PoseRepresentation {
+/**
+ * @param landmarks Raw 33-point pose landmarks, as produced by
+ *   `detectPoseInImage` / `detectFullBodyInImage` from lib/pose (one
+ *   entry from the `poses` array — i.e. a single detected person).
+ */
+export function buildPoseRepresentation(landmarks: NormalizedLandmark[]): PoseRepresentation {
   const { landmarks: normalizedLandmarks, info } = normalizePoseLandmarks(landmarks);
-
-  let silhouette: ReferenceSilhouette | undefined = undefined;
-  const refW = imageWidth && imageWidth > 0 ? imageWidth : 1000;
-  const refH = imageHeight && imageHeight > 0 ? imageHeight : 1000;
-
-  if (segmentationMask && segmentationMask.data && segmentationMask.width > 0) {
-    silhouette = extractSilhouetteFromMask(
-      segmentationMask.data,
-      segmentationMask.width,
-      segmentationMask.height,
-      landmarks,
-      refW,
-      refH
-    );
-  } else {
-    silhouette = buildFallbackSilhouette(landmarks, refW, refH);
-  }
 
   return {
     head: buildHeadZone(normalizedLandmarks),
@@ -45,6 +36,5 @@ export function buildPoseRepresentation(
     rightLeg: buildRightLegZone(normalizedLandmarks),
     normalizedLandmarks,
     normalization: info,
-    silhouette,
   };
 }

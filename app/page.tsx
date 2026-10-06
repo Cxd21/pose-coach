@@ -19,8 +19,8 @@ export default function Home() {
           </Link>
         </p>
         <p className="mt-1 text-sm">
-          <Link href="/live" className="text-pink-400 hover:underline font-medium">
-            → Milestone 5: Gen-Z Live Camera Pose Coach (Active)
+          <Link href="/live" className="text-cyan-400 hover:underline">
+            → Milestone 4: live camera pose coaching
           </Link>
         </p>
       </div>

@@ -30,12 +30,21 @@ export function useCoachingTip(result: PoseSimilarityResult | null): ActiveTipSt
   const [tip, setTip] = useState<ActiveTipState | null>(null);
   const lastZoneRef = useRef<ZoneKey | null>(null);
   const lastChangeAtRef = useRef(0);
+  // Tracks the same "has a tip ever been shown" condition the old code read
+  // via `!tip` — but via a ref instead of the state value itself, so this
+  // effect doesn't need `tip` in its dependency array. Including a value
+  // that the effect itself sets (via setTip) as a dependency is a
+  // self-referential effect: every setTip call re-triggers the effect,
+  // which — combined with `result` already changing every video frame —
+  // was compounding into runaway updates ("Maximum update depth exceeded").
+  const hasShownTipRef = useRef(false);
 
   useEffect(() => {
     queueMicrotask(() => {
       if (!result) {
         setTip(null);
         lastZoneRef.current = null;
+        hasShownTipRef.current = false;
         return;
       }
 
@@ -43,9 +52,10 @@ export function useCoachingTip(result: PoseSimilarityResult | null): ActiveTipSt
       const now = Date.now();
 
       if (worst === null) {
-        if (lastZoneRef.current !== null || !tip) {
+        if (lastZoneRef.current !== null || !hasShownTipRef.current) {
           lastZoneRef.current = null;
           lastChangeAtRef.current = now;
+          hasShownTipRef.current = true;
           setTip({
             zone: null,
             text: tipForAllMatched(),
@@ -55,9 +65,10 @@ export function useCoachingTip(result: PoseSimilarityResult | null): ActiveTipSt
       }
 
       const enoughTimePassed = now - lastChangeAtRef.current > MIN_TIP_INTERVAL_MS;
-      if (worst !== lastZoneRef.current && (enoughTimePassed || !lastZoneRef.current)) {
+      if (worst !== lastZoneRef.current && (enoughTimePassed || !hasShownTipRef.current)) {
         lastZoneRef.current = worst;
         lastChangeAtRef.current = now;
+        hasShownTipRef.current = true;
         setTip({
           zone: worst,
           text: tipForZone(worst),
@@ -65,7 +76,8 @@ export function useCoachingTip(result: PoseSimilarityResult | null): ActiveTipSt
         });
       }
     });
-  }, [result, tip]);
+  }, [result]);
 
   return tip;
 }
+

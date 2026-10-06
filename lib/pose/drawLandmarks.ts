@@ -1,3 +1,16 @@
+/**
+ * Debug-only rendering helpers: draws detected body pose, face mesh, and
+ * hand skeletons onto a canvas. This is purely for development
+ * visualization — per the product spec, the final app will NOT show any
+ * of this to end users. Keeping it in its own module makes it easy to
+ * delete or gate behind a debug flag later without touching detection
+ * logic in landmarker.ts / faceLandmarker.ts / handLandmarker.ts.
+ *
+ * This file intentionally never imports @mediapipe/tasks-vision directly —
+ * it only consumes plain data (landmark arrays, connection-index tuples)
+ * exported from the three landmarker modules and from ./types.
+ */
+
 import { POSE_CONNECTIONS } from "./types";
 import type { NormalizedLandmark, HandDetectionEntry, CombinedDetectionResult } from "./types";
 import {
@@ -15,20 +28,24 @@ export interface DrawOptions {
   lineColor?: string;
   pointRadius?: number;
   lineWidth?: number;
+  /** Skip drawing landmarks below this visibility score (0-1). Body pose only. */
   minVisibility?: number;
+  /** Color for the face mesh outline (eyes, eyebrows, lips, face oval). */
   faceColor?: string;
+  /** Color for hand/finger skeletons. */
   handColor?: string;
+  /** Joint dot radius for hand landmarks (kept smaller than body joints — 21 points per hand is dense). */
   handPointRadius?: number;
 }
 
 const DEFAULT_OPTIONS: Required<DrawOptions> = {
-  pointColor: "#22d3ee",
-  lineColor: "#a3e635",
+  pointColor: "#22d3ee", // cyan-400 — body joints
+  lineColor: "#a3e635", // lime-400 — body bones
   pointRadius: 5,
   lineWidth: 3,
   minVisibility: 0.3,
-  faceColor: "#f472b6",
-  handColor: "#fbbf24",
+  faceColor: "#f472b6", // pink-400 — face mesh
+  handColor: "#fbbf24", // amber-400 — hand/finger skeleton
   handPointRadius: 2.5,
 };
 
@@ -56,6 +73,10 @@ function drawConnections(
   }
 }
 
+/**
+ * Draws one detected body pose's skeleton (connections) and joints (points)
+ * onto a canvas, given normalized [0,1] landmark coordinates.
+ */
 export function drawPoseSkeleton(
   ctx: CanvasRenderingContext2D,
   landmarks: NormalizedLandmark[],
@@ -68,6 +89,7 @@ export function drawPoseSkeleton(
   const isVisible = (lm: NormalizedLandmark | undefined) =>
     !!lm && (lm.visibility === undefined || lm.visibility >= opts.minVisibility);
 
+  // Bones first, so joints draw on top. Skip any bone touching a low-visibility joint.
   ctx.strokeStyle = opts.lineColor;
   ctx.lineWidth = opts.lineWidth;
   const visibleConnections = POSE_CONNECTIONS.filter(
@@ -75,6 +97,7 @@ export function drawPoseSkeleton(
   );
   drawConnections(ctx, landmarks, visibleConnections, canvasWidth, canvasHeight);
 
+  // Joints.
   ctx.fillStyle = opts.pointColor;
   for (const lm of landmarks) {
     if (!isVisible(lm)) continue;
@@ -85,6 +108,12 @@ export function drawPoseSkeleton(
   }
 }
 
+/**
+ * Draws a defined head: face outline, eyes, eyebrows, and lips from the
+ * 478-point face mesh (rather than the full dense tesselation, which would
+ * look cluttered). No joint dots are drawn for the face — contour lines
+ * alone read clearly as a face at debug-overlay scale.
+ */
 export function drawFaceMesh(
   ctx: CanvasRenderingContext2D,
   landmarks: NormalizedLandmark[],
@@ -108,6 +137,9 @@ export function drawFaceMesh(
   }
 }
 
+/**
+ * Draws one hand's 21-point finger skeleton (wrist + 4 joints per finger).
+ */
 export function drawHandSkeleton(
   ctx: CanvasRenderingContext2D,
   hand: HandDetectionEntry,
@@ -130,6 +162,10 @@ export function drawHandSkeleton(
   }
 }
 
+/**
+ * Convenience helper: clears the canvas and draws every detected body
+ * pose, face, and hand from a combined detection result.
+ */
 export function drawFullBodyDetection(
   canvas: HTMLCanvasElement,
   result: CombinedDetectionResult,

@@ -14,8 +14,9 @@ export interface UseCameraStreamResult {
 
 /**
  * Requests webcam access and attaches the resulting stream to a `<video>`
- * element. Ensures the stream is always reattached and playing if the video
- * element remounts or updates.
+ * element. Handles the common failure modes (permission denied, no camera
+ * present, camera already in use) with a plain-language message instead of
+ * letting the raw DOMException surface.
  */
 export function useCameraStream(): UseCameraStreamResult {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -28,31 +29,7 @@ export function useCameraStream(): UseCameraStreamResult {
     streamRef.current = null;
   }, []);
 
-  const attachStream = useCallback(() => {
-    const video = videoRef.current;
-    const stream = streamRef.current;
-    if (video && stream && stream.active) {
-      if (video.srcObject !== stream) {
-        video.srcObject = stream;
-      }
-      video.play().catch(() => {
-        // Autoplay may already be active or handled by browser
-      });
-    }
-  }, []);
-
   const requestCamera = useCallback(() => {
-    // If stream is already alive, simply reattach and continue
-    if (
-      streamRef.current &&
-      streamRef.current.active &&
-      streamRef.current.getVideoTracks().some((t) => t.readyState === "live")
-    ) {
-      attachStream();
-      setStatus("streaming");
-      return;
-    }
-
     setStatus("requesting");
     setErrorMessage(null);
 
@@ -66,7 +43,9 @@ export function useCameraStream(): UseCameraStreamResult {
       .getUserMedia({ video: { facingMode: "user" }, audio: false })
       .then((stream) => {
         streamRef.current = stream;
-        attachStream();
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
         setStatus("streaming");
       })
       .catch((err: unknown) => {
@@ -81,17 +60,13 @@ export function useCameraStream(): UseCameraStreamResult {
           setErrorMessage("Couldn't access the camera.");
         }
       });
-  }, [attachStream]);
+  }, []);
 
   useEffect(() => {
     queueMicrotask(() => requestCamera());
     return () => stopStream();
-  }, [requestCamera, stopStream]);
-
-  // Ensure stream is always attached whenever the video DOM element is present
-  useEffect(() => {
-    attachStream();
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return { videoRef, status, errorMessage, requestCamera };
 }

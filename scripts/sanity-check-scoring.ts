@@ -1,7 +1,11 @@
+// Run with: npx tsx scripts/sanity-check-scoring.ts
+// Not part of the app build — a manual verification script for the scoring module.
+
 import { PoseLandmarkIndex, type NormalizedLandmark } from "../lib/pose/types";
 import { buildPoseRepresentation } from "../lib/pose-processing";
 import { comparePoses } from "../lib/pose-scoring";
 
+/** Builds a simple standing "reference" pose: arms down, legs straight, facing camera. */
 function buildStandingPose(overrides: Partial<Record<PoseLandmarkIndex, Partial<NormalizedLandmark>>> = {}) {
   const base: NormalizedLandmark[] = new Array(33).fill(null).map(() => ({
     x: 0.5,
@@ -14,6 +18,7 @@ function buildStandingPose(overrides: Partial<Record<PoseLandmarkIndex, Partial<
     base[idx] = { x, y, z: 0, visibility: 0.95 };
   };
 
+  // Rough standing figure, in MediaPipe's [0,1] image-space (y grows downward).
   set(PoseLandmarkIndex.NOSE, 0.5, 0.15);
   set(PoseLandmarkIndex.LEFT_EYE, 0.48, 0.14);
   set(PoseLandmarkIndex.RIGHT_EYE, 0.52, 0.14);
@@ -53,10 +58,12 @@ function printResult(label: string, result: ReturnType<typeof comparePoses>) {
   }
 }
 
+// --- Test 1: identical poses should score ~100 everywhere -----------------
 const standing = buildStandingPose();
 const identicalResult = comparePoses(buildPoseRepresentation(standing), buildPoseRepresentation(standing));
 printResult("Test 1: identical poses (expect ~100 everywhere, all passed)", identicalResult);
 
+// --- Test 2: right arm raised — only rightArm should score low ------------
 const rightArmRaised = buildStandingPose({
   [PoseLandmarkIndex.RIGHT_ELBOW]: { x: 0.62, y: 0.15 },
   [PoseLandmarkIndex.RIGHT_WRIST]: { x: 0.62, y: 0.0 },
@@ -64,14 +71,16 @@ const rightArmRaised = buildStandingPose({
 const raisedArmResult = comparePoses(buildPoseRepresentation(standing), buildPoseRepresentation(rightArmRaised));
 printResult("Test 2: user raised right arm (expect low rightArm score, others high)", raisedArmResult);
 
+// --- Test 3: shift + scale the WHOLE pose (simulating different framing/distance) ---
 const shiftedAndScaled = buildStandingPose();
 for (const lm of shiftedAndScaled) {
-  lm.x = lm.x * 0.5 + 0.2;
+  lm.x = lm.x * 0.5 + 0.2; // scale down + shift right
   lm.y = lm.y * 0.5 + 0.3;
 }
 const framingResult = comparePoses(buildPoseRepresentation(standing), buildPoseRepresentation(shiftedAndScaled));
 printResult("Test 3: same pose, different position/scale in frame (expect ~100 everywhere)", framingResult);
 
+// --- Test 4: right leg fully occluded (very low visibility) should be "unreliable", not a fail ---
 const occludedLeg = buildStandingPose({
   [PoseLandmarkIndex.RIGHT_HIP]: { visibility: 0.05 },
   [PoseLandmarkIndex.RIGHT_KNEE]: { visibility: 0.05 },

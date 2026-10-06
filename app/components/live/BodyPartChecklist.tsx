@@ -149,3 +149,4 @@ export default function BodyPartChecklist({ items }: { items: ChecklistItem[] })
     </div>
   );
 }
+
