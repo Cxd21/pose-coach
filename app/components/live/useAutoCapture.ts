@@ -2,19 +2,21 @@
 
 import { useEffect, useRef } from "react";
 import type { PoseSimilarityResult } from "@/lib/pose-scoring";
-import { isPoseFullyMatched } from "@/lib/pose-coaching";
+import { isPoseFullyMatched, type FramingMatch } from "@/lib/pose-coaching";
 
 const DEFAULT_HOLD_MS = 1000;
 
 /**
  * Watches the live similarity result and calls `onCapture` once the pose
- * has satisfied `isPoseFullyMatched` continuously for `holdMs` — not on the
- * first matching frame, so a brief flicker through the threshold doesn't
- * trigger an accidental photo. Only active when `enabled` is true (i.e.
- * auto-capture mode is selected and no photo has been taken yet).
+ * has satisfied `isPoseFullyMatched` (pose accuracy AND framing) continuously
+ * for `holdMs` — not on the first matching frame, so a brief flicker through
+ * the threshold doesn't trigger an accidental photo. Only active when
+ * `enabled` is true (i.e. auto-capture mode is selected and no photo has
+ * been taken yet).
  */
 export function useAutoCapture(
   result: PoseSimilarityResult | null,
+  framing: FramingMatch | null,
   enabled: boolean,
   onCapture: () => void,
   holdMs: number = DEFAULT_HOLD_MS
@@ -33,7 +35,7 @@ export function useAutoCapture(
       return;
     }
 
-    const matched = result !== null && isPoseFullyMatched(result);
+    const matched = result !== null && isPoseFullyMatched(result, framing);
 
     if (!matched) {
       holdStartRef.current = null;
@@ -64,5 +66,5 @@ export function useAutoCapture(
     }, remaining);
 
     return () => clearTimeout(timer);
-  }, [result, enabled, holdMs]);
+  }, [result, framing, enabled, holdMs]);
 }

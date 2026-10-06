@@ -9,6 +9,7 @@
 import type { PoseSimilarityResult } from "@/lib/pose-scoring";
 import type { ZoneKey } from "./types";
 import { ZONE_KEYS } from "./types";
+import type { FramingMatch } from "./framing";
 
 export interface CoachingTipData {
   prefix: string;
@@ -63,5 +64,25 @@ export function structuredTipForZone(zone: ZoneKey): CoachingTipData {
 
 export function tipForAllMatched(): string {
   return ALL_MATCHED_TIP;
+}
+
+/**
+ * Directional composition guidance: pose shape can be perfect while the
+ * subject stands entirely outside the fixed guide, which still makes for
+ * a poorly composed photo. This takes priority over body-part tips when
+ * framing is off (see useCoachingTip), since fixing position/distance is
+ * a prerequisite for fine pose adjustments being useful at all.
+ */
+export function framingTip(framing: FramingMatch): string {
+  if (framing.sizeRatio < 0.7) return "Step closer to fill the outline 💗";
+  if (framing.sizeRatio > 1.4) return "Step back a little 💗";
+
+  if (!framing.direction) return "Step into the outline 💗";
+
+  const { x, y } = framing.direction;
+  if (Math.abs(x) >= Math.abs(y)) {
+    return x > 0 ? "Move right to align with the outline 💗" : "Move left to align with the outline 💗";
+  }
+  return y > 0 ? "Move down slightly to align 💗" : "Move up slightly to align 💗";
 }
 

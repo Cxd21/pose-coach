@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { computeGuidePlacement } from "@/lib/pose-processing";
 import type { ReferenceSilhouette } from "@/lib/pose-processing";
 
 export interface SilhouetteOverlayProps {
@@ -8,9 +9,6 @@ export interface SilhouetteOverlayProps {
   /** Real, photo-derived silhouette (faded photo cutout + traced contour) built once from the reference photo. */
   silhouette: ReferenceSilhouette | null;
 }
-
-/** How much of the camera frame's height the guide's bounding box should fill. */
-const FRAME_FILL_RATIO = 0.82;
 
 /**
  * Draws the target-pose silhouette guide, fixed to the camera frame.
@@ -46,12 +44,12 @@ export default function SilhouetteOverlay({ videoRef, silhouette }: SilhouetteOv
       // Fixed fit-to-frame transform: scale the reference person's bounding
       // box to fill most of the frame's height, centered. Computed fresh
       // each time (photo change / video metadata becomes available) but
-      // never touches anything about the live user.
-      const targetHeight = canvas.height * FRAME_FILL_RATIO;
-      const scale = targetHeight / bounds.height;
-      const targetWidth = bounds.width * scale;
-      const destX = (canvas.width - targetWidth) / 2;
-      const destY = (canvas.height - targetHeight) / 2;
+      // never touches anything about the live user. Shared with the
+      // framing-check logic in usePoseCoachingLoop so both always agree on
+      // exactly where the guide is.
+      const placement = computeGuidePlacement(bounds, canvas.width, canvas.height);
+      const { x: destX, y: destY, width: targetWidth, height: targetHeight } = placement;
+      const scale = bounds.height > 0 ? targetHeight / bounds.height : 0;
 
       // 1. Flat white silhouette fill, cropped to the person's bounding box.
       ctx.drawImage(
@@ -73,7 +71,7 @@ export default function SilhouetteOverlay({ videoRef, silhouette }: SilhouetteOv
       ctx.save();
       ctx.lineCap = "round";
       ctx.setLineDash([1, 8]);
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.strokeStyle = "rgba(107, 114, 128, 0.8)"; // darker shade of the same blue-grey fill, for a visible boundary
       ctx.lineWidth = 3;
       ctx.beginPath();
       contour.forEach((p, i) => {

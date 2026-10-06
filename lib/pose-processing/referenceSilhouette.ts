@@ -35,6 +35,33 @@ export interface ReferenceSilhouette {
   bounds: { x: number; y: number; width: number; height: number };
 }
 
+/** How much of the camera frame's height the guide's bounding box fills. Shared by the renderer and the framing check so they always agree on where the guide actually is. */
+export const GUIDE_FRAME_FILL_RATIO = 0.82;
+
+/**
+ * Computes the guide's fixed on-screen box for a given canvas size — the
+ * exact placement `SilhouetteOverlay` draws at. Exposed here (not just
+ * inlined in the overlay component) so the live coaching loop can use the
+ * identical box to check whether the user is actually standing where the
+ * guide is, instead of only checking pose *shape* similarity.
+ */
+export function computeGuidePlacement(
+  bounds: { width: number; height: number },
+  canvasWidth: number,
+  canvasHeight: number,
+  fillRatio: number = GUIDE_FRAME_FILL_RATIO
+): { x: number; y: number; width: number; height: number } {
+  const targetHeight = canvasHeight * fillRatio;
+  const scale = bounds.height > 0 ? targetHeight / bounds.height : 0;
+  const targetWidth = bounds.width * scale;
+  return {
+    x: (canvasWidth - targetWidth) / 2,
+    y: (canvasHeight - targetHeight) / 2,
+    width: targetWidth,
+    height: targetHeight,
+  };
+}
+
 export interface ReferenceSilhouetteOptions {
   /** 0-1 opacity of the grey fill. Spec target: 30-40%. */
   fillOpacity?: number;
@@ -50,7 +77,7 @@ export interface ReferenceSilhouetteOptions {
 
 const DEFAULTS: Required<ReferenceSilhouetteOptions> = {
   fillOpacity: 0.35,
-  fillColor: "#ffffff",
+  fillColor: "#d7dae0",
   maskThreshold: 0.5,
   contourGridSize: 220,
   smoothingIterations: 2,

@@ -5,7 +5,7 @@ export { angleBetween, angleFromVertical } from "./angles";
 export type { Point2D } from "./angles";
 export { buildSilhouetteShapes, drawSilhouette } from "./silhouette";
 export type { SilhouetteShape, SilhouetteProjection, SilhouetteDrawOptions } from "./silhouette";
-export { buildReferenceSilhouette } from "./referenceSilhouette";
+export { buildReferenceSilhouette, computeGuidePlacement, GUIDE_FRAME_FILL_RATIO } from "./referenceSilhouette";
 export type { ReferenceSilhouette, ReferenceSilhouetteOptions } from "./referenceSilhouette";
 export type {
   PoseRepresentation,

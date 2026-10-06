@@ -7,28 +7,42 @@ import {
   tipForZone,
   structuredTipForZone,
   tipForAllMatched,
+  framingTip,
   type ZoneKey,
   type CoachingTipData,
+  type FramingMatch,
 } from "@/lib/pose-coaching";
 
 const MIN_TIP_INTERVAL_MS = 1500;
 
+/** "framing" is a pseudo-zone used only for tip-tracking/debounce purposes — it isn't one of the six scored body zones. */
+type TipTarget = ZoneKey | "framing" | null;
+
 export interface ActiveTipState {
-  zone: ZoneKey | null;
+  zone: TipTarget;
   text: string;
   structured?: CoachingTipData;
 }
 
 /**
- * Picks one supportive tip at a time from `lib/pose-coaching`'s rule-based
- * selection, but only changes the displayed tip when the target zone
- * actually changes (and at most every MIN_TIP_INTERVAL_MS) — otherwise a
- * borderline zone could flip the tip every frame (~30x/sec), which would
- * read as jittery rather than calm.
+ * Picks one supportive tip at a time. Framing (is the user actually
+ * standing where the fixed guide is drawn) takes priority over body-part
+ * tips: composition/position is worth fixing before fine pose details,
+ * since a perfectly-shaped pose off to one side of the frame still isn't
+ * a well-composed photo. Falls back to the existing rule-based body-part
+ * tip once framing is good.
+ *
+ * Only changes the displayed tip when the target actually changes (and at
+ * most every MIN_TIP_INTERVAL_MS) — otherwise a borderline value could
+ * flip the tip every frame (~30x/sec), which would read as jittery rather
+ * than calm.
  */
-export function useCoachingTip(result: PoseSimilarityResult | null): ActiveTipState | null {
+export function useCoachingTip(
+  result: PoseSimilarityResult | null,
+  framing: FramingMatch | null
+): ActiveTipState | null {
   const [tip, setTip] = useState<ActiveTipState | null>(null);
-  const lastZoneRef = useRef<ZoneKey | null>(null);
+  const lastTargetRef = useRef<TipTarget>(null);
   const lastChangeAtRef = useRef(0);
   // Tracks the same "has a tip ever been shown" condition the old code read
   // via `!tip` — but via a ref instead of the state value itself, so this
@@ -43,41 +57,48 @@ export function useCoachingTip(result: PoseSimilarityResult | null): ActiveTipSt
     queueMicrotask(() => {
       if (!result) {
         setTip(null);
-        lastZoneRef.current = null;
+        lastTargetRef.current = null;
         hasShownTipRef.current = false;
         return;
       }
 
-      const worst = pickWorstZone(result);
       const now = Date.now();
+      const enoughTimePassed = now - lastChangeAtRef.current > MIN_TIP_INTERVAL_MS;
+      const readyToChange = enoughTimePassed || !hasShownTipRef.current;
 
-      if (worst === null) {
-        if (lastZoneRef.current !== null || !hasShownTipRef.current) {
-          lastZoneRef.current = null;
-          lastChangeAtRef.current = now;
-          hasShownTipRef.current = true;
-          setTip({
-            zone: null,
-            text: tipForAllMatched(),
-          });
+      const commit = (target: TipTarget, tipState: ActiveTipState) => {
+        lastTargetRef.current = target;
+        lastChangeAtRef.current = now;
+        hasShownTipRef.current = true;
+        setTip(tipState);
+      };
+
+      // Framing takes priority when it's off — fix position before pose detail.
+      if (framing && !framing.isWellFramed) {
+        if (lastTargetRef.current !== "framing" && readyToChange) {
+          commit("framing", { zone: "framing", text: framingTip(framing) });
         }
         return;
       }
 
-      const enoughTimePassed = now - lastChangeAtRef.current > MIN_TIP_INTERVAL_MS;
-      if (worst !== lastZoneRef.current && (enoughTimePassed || !hasShownTipRef.current)) {
-        lastZoneRef.current = worst;
-        lastChangeAtRef.current = now;
-        hasShownTipRef.current = true;
-        setTip({
+      const worst = pickWorstZone(result);
+
+      if (worst === null) {
+        if (lastTargetRef.current !== null || !hasShownTipRef.current) {
+          commit(null, { zone: null, text: tipForAllMatched() });
+        }
+        return;
+      }
+
+      if (worst !== lastTargetRef.current && readyToChange) {
+        commit(worst, {
           zone: worst,
           text: tipForZone(worst),
           structured: structuredTipForZone(worst),
         });
       }
     });
-  }, [result]);
+  }, [result, framing]);
 
   return tip;
 }
-

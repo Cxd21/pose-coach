@@ -48,15 +48,16 @@ export default function LiveCoach() {
 
   const isStreaming = cameraStatus === "streaming";
 
-  const { result, personDetected } = usePoseCoachingLoop(
+  const { result, framing, personDetected } = usePoseCoachingLoop(
     videoRef,
     referencePose,
+    referenceSilhouette,
     isStreaming && !capturedPhotoUrl,
     DEFAULT_SCORING_CONFIG.passThreshold
   );
 
   const checklistItems = useBodyPartChecklist(result);
-  const tipState = useCoachingTip(result);
+  const tipState = useCoachingTip(result, framing);
 
   const handleCapture = useCallback(() => {
     const video = videoRef.current;
@@ -64,7 +65,7 @@ export default function LiveCoach() {
     setCapturedPhotoUrl(captureFrame(video));
   }, [videoRef]);
 
-  useAutoCapture(result, mode === "auto" && isStreaming && !capturedPhotoUrl, handleCapture);
+  useAutoCapture(result, framing, mode === "auto" && isStreaming && !capturedPhotoUrl, handleCapture);
 
   const overallScore = result ? Math.round(result.overallScore) : 0;
 
@@ -302,7 +303,7 @@ export default function LiveCoach() {
       <footer className="text-center">
         <p className="flex items-center justify-center gap-1 text-[11px] font-medium text-neutral-500">
           <span className="text-pink-400">✨</span>
-          Auto capture when everything is above 90% for 1 second
+          Auto capture when pose and framing both match, held for 1 second
         </p>
       </footer>
     </div>

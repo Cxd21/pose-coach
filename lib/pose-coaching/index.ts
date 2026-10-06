@@ -12,7 +12,10 @@ export {
   tipForZone,
   structuredTipForZone,
   tipForAllMatched,
+  framingTip,
 } from "./tips";
 export type { CoachingTipData } from "./tips";
 export { isPoseFullyMatched } from "./capture";
+export { computeFramingMatch, boundingBoxOfPoints } from "./framing";
+export type { Box, FramingMatch } from "./framing";
 

@@ -7,6 +7,7 @@
 
 import type { PoseSimilarityResult } from "@/lib/pose-scoring";
 import { ZONE_KEYS } from "./types";
+import type { FramingMatch } from "./framing";
 
 /** At least this many of the six zones must be reliably measured, or we can't meaningfully judge the pose at all. */
 const MIN_RELIABLE_ZONES = 3;
@@ -19,7 +20,7 @@ const MIN_RELIABLE_ZONES = 3;
  * But if too FEW zones are reliable overall, we bail out entirely rather
  * than risk auto-capturing a frame where we could barely see anyone.
  */
-export function isPoseFullyMatched(result: PoseSimilarityResult): boolean {
+function isPoseAccuracyMatched(result: PoseSimilarityResult): boolean {
   const reliableZones = ZONE_KEYS.filter((key) => result.zones[key].reliable);
   if (reliableZones.length < MIN_RELIABLE_ZONES) return false;
 
@@ -27,4 +28,22 @@ export function isPoseFullyMatched(result: PoseSimilarityResult): boolean {
     const zone = result.zones[key];
     return !zone.reliable || zone.passed === true;
   });
+}
+
+/**
+ * Full capture-readiness check: pose *shape* is intentionally
+ * position/scale-invariant (comparing a pose shouldn't require standing in
+ * an exact spot), but a fixed composition guide only does its job if the
+ * subject is actually standing roughly where it's drawn — otherwise a
+ * technically perfect pose off to one side of the frame would still
+ * auto-capture a poorly composed photo. Framing is therefore checked as a
+ * separate, additional requirement here, not folded into the per-zone
+ * pose-accuracy scores.
+ */
+export function isPoseFullyMatched(result: PoseSimilarityResult, framing: FramingMatch | null): boolean {
+  if (!isPoseAccuracyMatched(result)) return false;
+  // No framing signal yet (e.g. guide not loaded) — fall back to pose-only,
+  // rather than blocking capture on a check we can't currently perform.
+  if (!framing) return true;
+  return framing.isWellFramed;
 }
