@@ -39,8 +39,12 @@ export function useCameraStream(): UseCameraStreamResult {
       return;
     }
 
+    const requestedMode = sessionStorage.getItem("pose-coach:camera-mode");
+    sessionStorage.removeItem("pose-coach:camera-mode");
+    const facingMode = requestedMode === "environment" ? "environment" : "user";
+
     navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: "user" }, audio: false })
+      .getUserMedia({ video: { facingMode }, audio: false })
       .then((stream) => {
         streamRef.current = stream;
         if (videoRef.current) {

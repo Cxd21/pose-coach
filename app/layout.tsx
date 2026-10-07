@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Pose Coach — CV Debug",
-  description: "Milestone 1: reference-image pose detection debug tool",
+  title: "Pose Coach",
+  description: "Choose a reference pose and get live coaching to match it.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

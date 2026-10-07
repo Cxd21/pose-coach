@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./figma-home.css";
 
 :root {
   --background: #ffffff;
@@ -10,13 +11,6 @@
   --color-foreground: var(--foreground);
   --font-sans: ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
@@ -37,4 +31,3 @@ body {
 .animate-strike-through {
   animation: strike-through 0.25s ease-out forwards;
 }
-
